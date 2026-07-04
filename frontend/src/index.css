@@ -1,0 +1,167 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f4f5f7;
+}
+
+.page {
+  max-width: 800px;
+  margin: 40px auto;
+  padding: 0 20px;
+}
+
+.editor-shell {
+  background: white;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  min-height: 400px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.ProseMirror {
+  outline: none;
+  min-height: 350px;
+  line-height: 1.6;
+  font-size: 16px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -24px -24px 16px -24px; /* undo .editor-shell's padding so this spans edge-to-edge */
+  padding: 10px 24px;
+  background: white;
+  border-bottom: 1px solid #e2e2e2;
+  border-radius: 8px 8px 0 0;
+  /* Sticks to the top of the viewport while scrolling a long document,
+     Word/Google-Docs style - `top: 0` means "stick once you'd otherwise
+     scroll past the top of the browser window". */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 2px;
+  padding-right: 10px;
+  border-right: 1px solid #e8e8e8;
+}
+
+.toolbar-group:last-child {
+  border-right: none;
+  padding-right: 0;
+}
+
+.toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 4px;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  color: #333;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: #f0f1f3;
+}
+
+.toolbar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.toolbar button.is-active {
+  background: #dbe4ff;
+  border-color: #94aefd;
+  color: #2c4bd6;
+}
+
+.ProseMirror a {
+  color: #3b5bdb;
+  text-decoration: underline;
+}
+
+/* Rendered by @tiptap/extension-collaboration-cursor for each remote
+   user's cursor. It sets border-color/background-color inline per user
+   (from their awareness "color"); these classes just supply the shape. */
+.collaboration-cursor__caret {
+  border-left: 1px solid #0d0d0d;
+  border-right: 1px solid #0d0d0d;
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+  position: relative;
+  word-break: normal;
+}
+
+.collaboration-cursor__label {
+  border-radius: 3px 3px 3px 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  left: -1px;
+  line-height: normal;
+  padding: 0.1rem 0.3rem;
+  position: absolute;
+  top: -1.4em;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.presence-bar {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+
+.presence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: white;
+  font-size: 12px;
+}
+
+.ProseMirror img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid #3b5bdb;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.drawing-canvas {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  touch-action: none; /* prevents the page from scrolling while drawing on touch devices */
+  cursor: crosshair;
+  display: block;
+}

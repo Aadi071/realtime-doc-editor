@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: docedit
+      POSTGRES_PASSWORD: docedit_dev_password
+      POSTGRES_DB: docedit
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Any .sql file in here is automatically run by the official Postgres
+      # image the FIRST time the container starts with an empty database.
+      # This is how our schema gets created without you running psql by hand.
+      - ./server/db/init:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+
+volumes:
+  postgres_data:
