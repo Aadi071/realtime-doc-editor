@@ -192,6 +192,81 @@ All 4 are now DONE:
      the new `users` columns - **this wipes all existing local data**
      (documents, accounts, everything), same as last time.
 
+## Deployment prep (in progress, currently paused for UI work)
+
+- Repo is now pushed to GitHub as its own standalone repo (Anty's choice
+  over a subfolder in the MyProjects monorepo) - recruiters expect a
+  dedicated project repo, not one buried in a bigger one.
+- `DEPLOYMENT.md` was rewritten for a no-GitHub-required CLI-direct
+  deploy path: `railway up` from `server/` and `vercel --prod` from
+  `frontend/`, since Anty wanted to skip wiring up GitHub-based
+  auto-deploy for now. `server/package.json` got a `start` script added
+  (`node src/server.js`) since Railway defaults to `npm start`.
+- Paused before finishing Railway setup (Postgres/Redis services, env
+  vars) - Anty wants a UI pass done first. Resume at task "Deploy
+  Postgres + Redis on Railway" in the task list when ready.
+
+## UI redesign (phase 1 - app shell + editor chrome)
+
+Anty wants the UI redone BEFORE deployment (reversed from the original
+plan of "UI after deployment"), and is doing this on a `development` git
+branch, merging to `main`/`master` only after bug-testing. Direction
+given: Google-Docs-like specifically for the EDITOR, but the rest of the
+app (login, document list, chrome) should be an original design; dark +
+light mode; smooth "Apple website"-like transitions; Anty will specify
+additional libraries (likely an animation library) in a later session.
+
+Done so far:
+- **Tailwind CSS v4** added via `@tailwindcss/vite` (no `tailwind.config.js`
+  needed in v4 - config lives in CSS via `@import "tailwindcss"` in
+  `index.css`). Wired into `vite.config.ts`.
+- **Dark/light mode**: `frontend/src/theme.tsx` - a `ThemeProvider` +
+  `useTheme()` hook, persisted to `localStorage`, defaults to OS
+  preference on first visit. Toggles a `.dark` class on `<html>`; Tailwind
+  v4's `@custom-variant dark (&:where(.dark, .dark *));` in `index.css` is
+  what makes `dark:` utilities respond to that class instead of only
+  `prefers-color-scheme`. Toggle button (Sun/Moon icon) lives in `App.tsx`'s
+  header.
+- **Design tokens**: plain CSS custom properties in `:root` / `.dark`
+  (`--bg`, `--surface`, `--surface-2`, `--border`, `--text`, `--text-muted`,
+  `--accent`, `--accent-soft`, `--accent-contrast`, `--danger`,
+  `--danger-soft`) in `index.css`, referenced everywhere via Tailwind's
+  arbitrary-value syntax (`bg-[var(--surface)]`) rather than Tailwind's
+  own `@theme` tokens - `@theme` values are baked in at build time and
+  can't respond to the runtime `.dark` class toggle the same way plain
+  CSS custom properties can.
+- **Smooth transitions**: a global `*,*::before,*::after` color-property
+  transition (200ms) in `index.css` makes the light/dark switch itself
+  feel like a cross-fade rather than a snap. A `.animate-in` keyframe
+  (fade + slight upward slide) is applied to top-level view swaps
+  (login <-> document list <-> editor) and to dropdown panels. Modals got
+  their own scale+fade entrance (`.modal`/`.modal-backdrop` keyframes).
+  All deliberately dependency-free CSS - easy to rip out once Anty
+  specifies a real animation library.
+- **Redesigned**: `Login.tsx` (centered card, icon badge, unified
+  verify-step UI), `DocumentList.tsx` (icon rows with role badges),
+  `App.tsx` (sticky blurred header with theme toggle), `SharesManager.tsx`
+  and `VersionHistory.tsx` (converted from always-visible inline panels to
+  toggle-button + dropdown-panel pattern, consistent with each other),
+  `DrawingModal.tsx` (restyled controls), and `DocumentEditor.tsx`'s
+  header (status dot, role badge, circular overlapping presence avatars
+  Google-Docs-style instead of the old text pills).
+- The `.editor-shell`/`.toolbar` CSS classes (plain CSS, not Tailwind)
+  were kept but converted to reference the same `var(--...)` tokens, so
+  the editor surface and toolbar are dark-mode-aware without a full
+  rewrite - these were left as plain CSS rather than converted to Tailwind
+  utility classes since they're doing structural things (sticky
+  positioning, negative-margin edge-to-edge toolbar) that read more
+  clearly as named CSS than a long utility class string.
+
+**Anty needs to run `npm install` in `frontend/`** - added `tailwindcss`
+and `@tailwindcss/vite` as new devDependencies.
+
+Not yet done: no animation library integration (waiting on Anty to
+specify one), no rename-document-title UI, no further "Apple-site" style
+polish beyond the CSS transitions described above - this is a first pass,
+not a final one.
+
 ## Post-batch bugs found and fixed (email verification shakeout)
 
 Right after building email verification, Anty hit "failed to fetch" and
@@ -295,6 +370,226 @@ integration guide.
 Tiptap/ProseMirror: tiptap.dev getting-started, core-concepts/introduction,
 core-concepts/prosemirror, core-concepts/schema.
 React/Vite: react.dev/learn, vite.dev/guide.
+
+## UI redesign (phase 2 - lamp toggle fix + toast notifications)
+
+- **LampToggle bulb direction fixed**: bulb now glows in dark mode, dims in
+  light mode (`frontend/src/LampToggle.tsx` - the `isLight ? glow : dim`
+  ternary was inverted to `!isLight ? glow : dim`, matching Anty's explicit
+  correction after two rounds of feedback).
+- **New dependency-free toast notification system** (inspired by looking
+  at HeroUI's component library for ideas - not installed as a dependency,
+  just used for pattern inspiration): `frontend/src/toast.tsx` exports a
+  `ToastProvider` + `useToast()` hook (`success`/`error`/`info`), fixed
+  top-right stack, 4s auto-dismiss, dismissible early via a close button.
+  Wired into `main.tsx` (wraps `<App>`, inside `ThemeProvider`). New
+  `.toast-in` keyframe animation added to `index.css`.
+- Wired into the two places that previously showed a small inline
+  `message` paragraph with no real UI: `SharesManager.tsx` (share added /
+  role changed / access removed / errors) and `VersionHistory.tsx`
+  (version saved / restored / errors). Both files' old `message` state and
+  its JSX were removed entirely in favor of toast calls.
+- Not yet installed/run: `npm install` isn't needed for this change (no
+  new npm dependencies, just a new local file), should hot-reload as-is.
+
+## UI redesign (phase 3 - confirm modal, undo/redo, autosave indicator, command palette)
+
+Four features requested after a HeroUI-inspired brainstorm; user picked
+all of them:
+
+- **`ConfirmModal.tsx`** (new) - themed replacement for `window.confirm()`,
+  reusing the `.modal-backdrop`/`.modal` animations. Wired into
+  `VersionHistory.tsx`'s restore-version flow (split into `askRestoreVersion`
+  which opens it and `runRestoreVersion` which does the actual work,
+  since a real modal is inherently async unlike the old synchronous
+  `window.confirm`). Also fixes the known issue where the native confirm
+  dialog blocked Chrome DevTools Protocol automation during the earlier
+  regression pass.
+- **Undo/redo toolbar buttons** in `DocumentEditor.tsx`'s `Toolbar`. Turned
+  out to need zero new state/logic - Tiptap's `Collaboration` extension
+  already ships its own Yjs-aware history (that's *why*
+  `StarterKit.configure({ history: false })` was already there), so
+  `editor.commands.undo()/redo()` and Ctrl+Z/Ctrl+Y already worked; these
+  are just visible buttons for the existing commands, disabled via
+  `editor.can().undo()/redo()`.
+- **Autosave "Saved"/"Saving…" indicator**, next to the role badge in
+  `DocumentEditor.tsx`. Listens to `ydoc.on('update')` and runs a
+  client-side 2.3s debounce timer that mirrors the server's own 2s
+  persistence debounce (`server/src/persistence.js`) - NOTE this is an
+  approximation, not a real save ack, since the y-websocket protocol has
+  no server->client "saved" message. Reacts to ANY change to the document
+  (yours or a collaborator's), which is semantically correct - it reflects
+  the document's saved state, not a personal one.
+- **Command palette** (`CommandPalette.tsx`, new) - Cmd/Ctrl+K global
+  shortcut, plus a visible `⌘K` button in the header (dispatches a
+  `open-command-palette` CustomEvent the palette listens for, so App
+  doesn't need to lift the palette's open state). Fuzzy-searches your
+  documents to jump to one, plus toggle-theme/back-to-list/log-out
+  actions, arrow-key + Enter navigation. Deliberately does NOT deep-link
+  into opening the Share/History dropdowns - those manage their own open
+  state internally in `SharesManager`/`VersionHistory` rather than via
+  props, and hooking the palette into that would need a larger refactor
+  not yet done.
+- New CSS in `index.css`: `.toast-in` keyframe (used by the earlier toast
+  system), `.command-palette-backdrop`/`.command-palette-modal` (override
+  the generic modal's centering/padding via CSS source order rather than
+  fighting Tailwind utility specificity, since both the generic and
+  override rules are single-class selectors in the same stylesheet).
+- No new npm dependencies - everything here is hand-rolled, consistent
+  with the toast system built earlier. `npm install` not required.
+
+## Homepage / landing page
+
+- **`Home.tsx`** (new) - pre-login landing page, shown instead of jumping
+  straight to the login form. Explains the actual problem the app solves
+  (concurrent-edit conflicts, paraphrased from README.md's "The problem"
+  section) in the hero copy, a 6-item feature grid (real-time editing,
+  presence, roles/sharing, version history, images/drawing, command
+  palette + theme toggle), and a "Built with" tech-stack pill row. Two
+  CTAs - "Create an account" / "Sign in" - both route into the existing
+  `Login.tsx`, just landing on a different starting tab.
+- **`Login.tsx`** - added an optional `initialMode?: 'login' | 'signup'`
+  prop (defaults to `'login'`) so the two CTAs can land directly on the
+  right form. Read once into `useState` - relies on Login remounting fresh
+  each time App swaps Home -> Login (which it does, since it's a
+  conditional render swap, not a persistent component), not on reactively
+  retargeting an already-mounted form.
+- **`App.tsx`** - added `authMode: 'login' | 'signup' | null` state.
+  `null` (the initial/logged-out default) shows `Home`; setting it shows
+  `Login` with that `initialMode`. Header shows a "Sign in" button on the
+  Home view, and a back-arrow (reusing the same slot/style as the
+  editor's "back to documents" arrow) on the Login view to return to Home.
+  `logOut()` resets `authMode` back to `null` so logging out lands back on
+  Home rather than dropping straight into a login form.
+- No new dependencies; hot-reloads as-is.
+
+## Rebrand to RTEDTR + Apple-homepage-style redesign
+
+- **Renamed to "RTEDTR"** in user-facing spots: `index.html` title, the
+  app header `<h1>` (`App.tsx`), the `Home.tsx` hero wordmark, and
+  `README.md`'s title. Left `package.json` names and internal identifiers
+  alone - branding-only change, not a rename of the codebase/repo.
+- **`Reveal.tsx`** (new) - dependency-free scroll-triggered fade/slide-in
+  wrapper (IntersectionObserver, unobserves after first reveal, respects
+  `prefers-reduced-motion` by skipping straight to visible). Supports a
+  `from` direction (`up`/`left`/`right`/`none`) and a `delay`, used
+  throughout the new homepage for Apple-style reveal-as-you-scroll.
+- **`Home.tsx` rebuilt** in an Apple-product-page style: full-bleed hero
+  (huge "RTEDTR" wordmark, soft radial accent-color glow behind it, badge
+  + tagline + pill CTAs, bouncing scroll-cue chevron linking to
+  `#features`), a big centered statement section, three full-width
+  alternating "spotlight" feature rows (real-time/CRDT, version history,
+  command palette + theme) each revealing from the side they're laid out
+  on, a compact 3-card grid for secondary features (presence, roles,
+  images/drawing), the tech-stack pill strip, and a closing CTA section.
+- **`App.tsx`** - Home is no longer wrapped in the shared 840px `<main>`
+  container (that stayed for Login/DocumentList/DocumentEditor) so its
+  sections can run full width; Home manages its own inner max-widths per
+  section instead.
+- **`index.css`** - added `scroll-behavior: smooth` (only under
+  `prefers-reduced-motion: no-preference`) for the hero's scroll-to-features link.
+- No new dependencies - `Reveal.tsx` is plain IntersectionObserver + CSS
+  transitions, consistent with the toast/command-palette/etc. pattern of
+  not reaching for an animation library until Anty specifies one.
+
+## Animated hero wordmark + homepage copy rewrite
+
+- **Homepage copy rewrite** - all of `Home.tsx`'s text (hero badge/tagline,
+  the big statement section, all three spotlight features, the secondary
+  feature grid, the closing CTA) rewritten in a punchier, sales-pitch
+  voice with a clear "us vs. generic collaborative editors" angle (e.g.
+  "most editors quietly pick a winner and throw away the loser's work" /
+  "just autosave wearing a nicer outfit") instead of the earlier flat
+  feature-description tone.
+- **`TypedWordmark.tsx`** (new) - the hero "RTEDTR" no longer just fades
+  in, it types itself in from both ends toward the middle: a left "cursor"
+  (accent color) and a right "cursor" (emerald, matching the "connected"
+  status dot color already used in `DocumentEditor.tsx`) each type 3
+  letters inward, meeting at the middle pair with a brief glow/scale pulse
+  (`wordmark-pulse` keyframe, `index.css`), then all six letters settle to
+  the normal text color. Deliberate: it's the product's own pitch (two
+  writers converging on the same result without colliding) acted out in
+  the logo itself, not just described in a card below it. Respects
+  `prefers-reduced-motion` (skips straight to the finished state).
+  `Home.tsx`'s subheading/CTA `Reveal` delays were retimed (520ms/640ms)
+  to land shortly after the typing animation gets going.
+- No new dependencies - plain `useState`/`setTimeout` + CSS transitions,
+  same pattern as `Reveal.tsx`.
+
+## Logo + recurring wordmark flourishes
+
+- **`Logo.tsx`** (new) - a scroll/editor hybrid icon: two rolled-parchment
+  end caps (rounded rects, muted tone) around a flat panel with three
+  horizontal "text lines" and a blinking accent-colored cursor bar after
+  the last (short) line - old document shape, modern editor tell.
+  Blinking handled by a `logo-cursor-blink` keyframe (`index.css`,
+  `steps(1)` so it snaps rather than fades, reading as a cursor not a
+  glow). Wired into `App.tsx`'s header (next to the "RTEDTR" title) and
+  `Home.tsx`'s hero (above the wordmark).
+- **`TypedWordmark.tsx` - recurring idle flourishes.** Once the initial
+  type-in+merge settles, a 10s interval alternates between two flourishes
+  for 1.2s each: "swap" (R and T arc across each other and back via
+  `letter-swap-left`/`letter-swap-right` keyframes - purely visual, the
+  DOM text and aria-label never actually change) and "documentPop" (a
+  faint `Logo` flashes in behind the letters while each one does a small
+  staggered pop, via `letter-repop` + `document-pop-icon` keyframes -
+  animationDelay staggered per letter index so it reads as a ripple, not
+  six letters bouncing in sync). Switched the per-letter reveal styling
+  from Tailwind translate utility classes to inline `transform`/`opacity`
+  so the new keyframe-driven flourishes don't fight the transition system
+  for the same CSS property. Both flourishes stay off entirely under
+  `prefers-reduced-motion`.
+- No new dependencies.
+
+## Wordmark swap flourish: local nudge -> full mirror swap
+
+Anty pointed out the "swap" flourish looked like the RT at the start was
+trading with the RT at the end - RTEDTR mirrors itself (R-T .. T-R), and
+the original implementation only nudged the first two letters against
+each other locally, so that read as a coincidence rather than something
+intentional. Rebuilt it to actually do that: R (index 0) now arcs all the
+way across to where the closing R (index 5) sits and back, and T (index
+1) does the same with the closing T (index 4) - two new keyframe pairs
+per letter (`letter-mirror-r-start/end`, `letter-mirror-t-start/end` in
+`index.css`), replacing the old adjacent-letter `letter-swap-left/right`.
+Distances are in `em`, roughly scaled to how many letters apart each pair
+sits (5 apart for the Rs, 3 for the Ts) - an approximation since the font
+isn't monospace. Also added `position: relative` + a `zIndex` bump to
+whichever letter is mid-swap (`TypedWordmark.tsx`), since without it the
+traveling letters would paint underneath whatever comes later in the DOM
+instead of sweeping visibly over the letters they cross. Text never
+actually reorders - purely a `transform` effect, DOM/`aria-label` stay
+"RTEDTR" throughout.
+
+## Simulated UI mockups for the spotlight rows
+
+The spotlight feature rows' placeholder canvases (a faded icon on a plain
+background) are now small, looping, self-contained recreations of each
+real component's actual UI - not live screen recordings. Anty was offered
+a choice between real captured footage (needs the dev server + a
+Chrome/computer-use recording pass) and simulated mockups (fully
+reliable, no external dependency); chose simulated.
+
+- **`RealtimeMockup.tsx`** (new) - two colored "cursors" (Alex, blue;
+  Sam, emerald) hand off typing a sentence partway through, with a
+  presence-avatar pair at the top matching the real app's overlapping-
+  circle style. Reuses the same "type from a point, hand off partway"
+  motif the hero wordmark already established.
+- **`VersionHistoryMockup.tsx`** (new) - a single elapsed-time interval
+  drives 4 stages (editing -> panel opens -> restoring -> restored),
+  matching the real `VersionHistory.tsx` panel's actual layout (header,
+  timestamped rows, Restore button) closely enough to read as that
+  feature.
+- **`CommandPaletteMockup.tsx`** (new) - a query types itself into a
+  search row, a filtered result list appears, one row highlights as
+  "selected" - matches `CommandPalette.tsx`'s real layout.
+- **`Home.tsx`** - `spotlightFeatures` entries gained a `Mockup:
+  ComponentType` field; the placeholder `<div>` + faded icon was replaced
+  with `<f.Mockup />` inside the same bordered/rounded card.
+- All three use a single `setInterval` (elapsed-time-based stage
+  machines, or a tracked type/hold timer chain for the typewriter one)
+  with clean teardown on unmount - no dangling timers. No new
+  dependencies.
 
 ## Not started / possible next steps
 
