@@ -32,6 +32,10 @@ import {
   Eraser,
   Image as ImageIcon,
   PenLine,
+  Undo2,
+  Redo2,
+  Check,
+  Loader2,
 } from 'lucide-react'
 
 // 'owner' | 'editor' | 'viewer' = a confirmed role.
@@ -108,6 +112,29 @@ function Toolbar({
 
   return (
     <div className="toolbar">
+      {/* Collaboration extension ships its own history implementation (a
+          Yjs-aware UndoManager under the hood) whenever StarterKit's own
+          history is disabled - see `StarterKit.configure({ history: false })`
+          below. That means editor.commands.undo()/redo() and the Ctrl+Z /
+          Ctrl+Y keyboard shortcuts already work with zero extra wiring;
+          these are just visible buttons for the same built-in commands. */}
+      <div className="toolbar-group">
+        <ToolbarButton
+          title="Undo (Ctrl+Z)"
+          disabled={!editor.can().undo()}
+          onClick={() => editor.chain().focus().undo().run()}
+        >
+          <Undo2 size={16} />
+        </ToolbarButton>
+        <ToolbarButton
+          title="Redo (Ctrl+Y)"
+          disabled={!editor.can().redo()}
+          onClick={() => editor.chain().focus().redo().run()}
+        >
+          <Redo2 size={16} />
+        </ToolbarButton>
+      </div>
+
       <div className="toolbar-group">
         <ToolbarButton
           title="Bold (Ctrl+B)"
@@ -248,22 +275,39 @@ function Toolbar({
 
 type Peer = { clientId: number; name: string; color: string; isMe: boolean }
 
+// Google-Docs-style overlapping circular avatars rather than the old text
+// pills - a ring in the surface color between avatars is what creates the
+// "stacked" look even though each avatar is a plain colored circle.
 function PresenceBar({ peers }: { peers: Peer[] }) {
   if (peers.length === 0) return null
   return (
-    <div className="presence-bar">
+    <div className="flex -space-x-2">
       {peers.map((peer) => (
-        <span
+        <div
           key={peer.clientId}
-          className="presence-badge"
+          title={peer.name + (peer.isMe ? ' (you)' : '')}
           style={{ backgroundColor: peer.color }}
+          className="ease-smooth flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2
+            border-[var(--surface)] text-[11px] font-semibold text-white transition-transform duration-150
+            hover:z-10 hover:scale-110"
         >
-          {peer.name}
-          {peer.isMe ? ' (you)' : ''}
-        </span>
+          {peer.name.charAt(0).toUpperCase()}
+        </div>
       ))}
     </div>
   )
+}
+
+const statusDotClass: Record<string, string> = {
+  connected: 'bg-emerald-500',
+  connecting: 'bg-amber-500',
+  disconnected: 'bg-[var(--danger)]',
+}
+
+const roleBadgeClass: Record<string, string> = {
+  owner: 'bg-[var(--accent-soft)] text-[var(--accent)]',
+  editor: 'bg-[var(--surface-2)] text-[var(--text-muted)]',
+  viewer: 'bg-[var(--surface-2)] text-[var(--text-muted)]',
 }
 
 export default function DocumentEditor({
@@ -380,6 +424,32 @@ export default function DocumentEditor({
     return () => provider.awareness.off('change', updatePeers)
   }, [provider])
 
+  // Google-Docs-style "Saved"/"Saving…" indicator. NOTE: this is an
+  // approximation, not a real save confirmation - the server (see
+  // server/src/persistence.js) debounces its actual Postgres write by 2s
+  // after the last edit, but never tells connected clients when that write
+  // completes; there's no such message in the y-websocket protocol we're
+  // using. So instead we mirror the same timing client-side: any change to
+  // the document (ours or a collaborator's - it's the DOCUMENT's saved
+  // state, not personal to whoever's asking) flips this to "Saving…", then
+  // back to "Saved" ~300ms after the server's own debounce window would
+  // have elapsed. Good enough to build user confidence; not a substitute
+  // for an actual ack if that ever matters more (e.g. a "close tab" guard).
+  const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | null>(null)
+  useEffect(() => {
+    const saveTimer = { current: null as number | null }
+    function handleUpdate() {
+      setSaveStatus('saving')
+      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+      saveTimer.current = window.setTimeout(() => setSaveStatus('saved'), 2300)
+    }
+    ydoc.on('update', handleUpdate)
+    return () => {
+      ydoc.off('update', handleUpdate)
+      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    }
+  }, [ydoc])
+
   const editor = useEditor(
     {
       extensions: [
@@ -462,28 +532,58 @@ export default function DocumentEditor({
     reader.readAsDataURL(file)
   }
 
+  const roleLabel = role ?? (role === null ? 'no access' : 'checking…')
+
   return (
     <div>
-      <p style={{ color: '#666' }}>
-        Document: <strong>{title}</strong> — status: <strong>{status}</strong> — your role:{' '}
-        <strong>{role ?? (role === null ? 'no access' : 'checking...')}</strong>
-      </p>
-
-      <PresenceBar peers={peers} />
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-xl font-semibold text-[var(--text)]">{title}</h2>
+          <div className="mt-1.5 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+            <span className="flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass[status] ?? 'bg-[var(--text-muted)]'}`} />
+              {status}
+            </span>
+            <span className="opacity-40">·</span>
+            <span
+              className={`rounded-full px-2 py-0.5 font-medium ${roleBadgeClass[roleLabel] ?? 'bg-[var(--surface-2)]'}`}
+            >
+              {roleLabel}
+            </span>
+            {saveStatus && (
+              <>
+                <span className="opacity-40">·</span>
+                <span className="flex items-center gap-1">
+                  {saveStatus === 'saving' ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Check size={11} />
+                  )}
+                  {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+        <PresenceBar peers={peers} />
+      </div>
 
       {role === null && (
-        <p style={{ color: '#b3261e' }}>
+        <div className="mb-4 rounded-xl bg-[var(--danger-soft)] px-4 py-2.5 text-sm text-[var(--danger)]">
           Your access to this document has been revoked or removed.
-        </p>
+        </div>
       )}
 
       {role === 'viewer' && (
-        <p style={{ color: '#b06a00' }}>You have view-only access to this document.</p>
+        <div className="mb-4 rounded-xl bg-amber-50 px-4 py-2.5 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+          You have view-only access to this document.
+        </div>
       )}
 
-      {role === 'owner' && <SharesManager docId={docId} token={token} />}
-
-      <VersionHistory docId={docId} token={token} role={role} ydoc={ydoc} editor={editor} />
+      <div className="mb-4 flex flex-wrap gap-2">
+        {role === 'owner' && <SharesManager docId={docId} token={token} />}
+        <VersionHistory docId={docId} token={token} role={role} ydoc={ydoc} editor={editor} />
+      </div>
 
       <input
         ref={fileInputRef}

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
+import { History, RotateCcw } from 'lucide-react'
 import * as Y from 'yjs'
 import { yDocToProsemirrorJSON } from 'y-prosemirror'
 import type { Editor } from '@tiptap/react'
 import { DOCUMENTS_API_URL as API_URL } from './config'
+import { useToast } from './toast'
+import ConfirmModal from './ConfirmModal'
 
 type VersionSummary = { id: string; created_at: string; created_by: string | null }
 
@@ -37,7 +40,10 @@ export default function VersionHistory({
 }) {
   const [versions, setVersions] = useState<VersionSummary[]>([])
   const [open, setOpen] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
+  // The id of the version awaiting a confirm/cancel decision in the modal -
+  // null means no confirmation is currently showing.
+  const [pendingRestoreId, setPendingRestoreId] = useState<string | null>(null)
+  const toast = useToast()
   const authHeaders = { Authorization: `Bearer ${token}` }
 
   async function loadVersions() {
@@ -51,7 +57,6 @@ export default function VersionHistory({
   }, [open])
 
   async function saveVersion() {
-    setMessage(null)
     // encodeStateAsUpdate() captures the ENTIRE current document state, not
     // just the latest edit - the same technique the server's autosave
     // uses, just triggered on demand instead of on a debounce timer.
@@ -62,28 +67,31 @@ export default function VersionHistory({
       body: JSON.stringify({ content: uint8ToBase64(bytes) }),
     })
     if (res.ok) {
-      setMessage('Version saved.')
+      toast.success('Version saved.')
       loadVersions()
     } else {
-      setMessage('Failed to save version.')
+      toast.error('Failed to save version.')
     }
   }
 
-  async function restoreVersion(versionId: string) {
+  // Split into "ask" (opens the modal) and "run" (does the actual work,
+  // called once the modal is confirmed) - window.confirm() used to make
+  // this synchronous, a themed modal makes it inherently async since it
+  // waits for a button click on a later render.
+  function askRestoreVersion(versionId: string) {
+    setPendingRestoreId(versionId)
+  }
+
+  async function runRestoreVersion(versionId: string) {
+    setPendingRestoreId(null)
     if (!editor) return
-    const confirmed = window.confirm(
-      'Replace the current document content with this version? This creates ' +
-        'a new edit - it does not erase anything anyone else has written ' +
-        'since (Yjs history only ever grows, it never gets deleted).',
-    )
-    if (!confirmed) return
 
     const res = await fetch(`${API_URL}/${docId}/versions/${versionId}`, {
       headers: authHeaders,
     })
     const data = await res.json()
     if (!res.ok) {
-      setMessage(data.error || 'failed to load version')
+      toast.error(data.error || 'Failed to load version')
       return
     }
 
@@ -98,60 +106,76 @@ export default function VersionHistory({
     Y.applyUpdate(tempDoc, base64ToUint8(data.content))
     const json = yDocToProsemirrorJSON(tempDoc, 'default')
     editor.commands.setContent(json)
-    setMessage('Restored — this is now a new edit on the live document.')
+    toast.success('Restored — this is now a new edit on the live document.')
   }
 
   const canManage = role === 'owner' || role === 'editor'
 
   return (
-    <div style={{ margin: '12px 0' }}>
-      <button onClick={() => setOpen((o) => !o)}>
-        {open ? 'Hide version history' : 'Version history'}
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`ease-smooth flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium
+          transition-colors duration-150 ${
+            open
+              ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
+              : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--bg)]'
+          }`}
+      >
+        <History size={14} />
+        History
       </button>
 
       {open && (
-        <div
-          style={{
-            border: '1px solid #e2e2e2',
-            borderRadius: 6,
-            padding: 12,
-            marginTop: 8,
-            background: '#fafafa',
-          }}
-        >
+        <div className="animate-in absolute left-0 top-full z-20 mt-2 w-80 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-lg">
           {canManage && (
-            <button onClick={saveVersion} style={{ marginBottom: 10 }}>
+            <button
+              onClick={saveVersion}
+              className="ease-smooth mb-3 w-full rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium
+                text-[var(--accent-contrast)] transition-opacity duration-150 hover:opacity-90"
+            >
               Save current version
             </button>
           )}
-          {message && <p style={{ fontSize: 13, color: '#666' }}>{message}</p>}
 
           {versions.length === 0 ? (
-            <p style={{ fontSize: 13, color: '#999' }}>No saved versions yet.</p>
+            <p className="text-xs text-[var(--text-muted)]">No saved versions yet.</p>
           ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
               {versions.map((v) => (
                 <li
                   key={v.id}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '6px 0',
-                    borderBottom: '1px solid #eee',
-                    fontSize: 13,
-                  }}
+                  className="flex items-center justify-between gap-2 border-b border-[var(--border)] py-2 text-xs last:border-0"
                 >
-                  <span>
+                  <span className="text-[var(--text-muted)]">
                     {new Date(v.created_at).toLocaleString()}
                     {v.created_by ? ` — ${v.created_by}` : ''}
                   </span>
-                  {canManage && <button onClick={() => restoreVersion(v.id)}>Restore</button>}
+                  {canManage && (
+                    <button
+                      onClick={() => askRestoreVersion(v.id)}
+                      className="ease-smooth flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium
+                        text-[var(--accent)] transition-colors duration-150 hover:bg-[var(--accent-soft)]"
+                    >
+                      <RotateCcw size={12} />
+                      Restore
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           )}
         </div>
+      )}
+
+      {pendingRestoreId && (
+        <ConfirmModal
+          title="Restore this version?"
+          message="Replace the current document content with this version? This creates a new edit - it does not erase anything anyone else has written since (Yjs history only ever grows, it never gets deleted)."
+          confirmLabel="Restore"
+          onConfirm={() => runRestoreVersion(pendingRestoreId)}
+          onCancel={() => setPendingRestoreId(null)}
+        />
       )}
     </div>
   )

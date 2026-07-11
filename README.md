@@ -1,4 +1,4 @@
-# Real-Time Collaborative Document Editor
+# RTEDTR — Real-Time Collaborative Document Editor
 
 A Google-Docs-style editor: multiple people open the same document, type at the same time, see
 each other's live cursors, and never lose an edit to a conflict — even if two people type in the
