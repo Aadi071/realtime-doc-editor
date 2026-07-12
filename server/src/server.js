@@ -41,9 +41,14 @@ const PORT = process.env.PORT || 1234
 
 const app = express()
 // CORS_ORIGIN lets you lock this down to your deployed frontend's exact
-// origin in production. Defaults to "*" (allow anything) for local dev,
-// where the frontend runs on a different port (5173) than this API.
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }))
+// origin(s) in production - comma-separated if the app is reachable at more
+// than one domain (e.g. a friendlier alias alongside the original Vercel
+// URL). Defaults to "*" (allow anything) for local dev, where the frontend
+// runs on a different port (5173) than this API.
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
+  : '*'
+app.use(cors({ origin: allowedOrigins }))
 app.use(express.json()) // parse JSON request bodies into req.body
 
 app.get('/', (_req, res) => {
