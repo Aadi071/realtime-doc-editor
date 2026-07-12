@@ -60,4 +60,16 @@ async function sendVerificationEmail(toEmail, code) {
       from: `RTEDTR <${process.env.GMAIL_USER}>`,
       to: toEmail,
       subject: 'Verify your email',
-      html: `<p>Your verification code is:</p><h2>${code}</h2><p>This code expires in 15 minutes.</p>
+      html: `<p>Your verification code is:</p><h2>${code}</h2><p>This code expires in 15 minutes.</p>`,
+    })
+
+    console.log(`[email] sent verification code to ${toEmail} (message id: ${info.messageId})`)
+  } catch (err) {
+    // Don't let an email-provider hiccup break signup entirely - log it
+    // and also print the code, so local testing/demoing can still proceed.
+    console.error(`[email] failed to send to ${toEmail}:`, err.message)
+    console.log(`[email] verification code for ${toEmail} was: ${code}`)
+  }
+}
+
+module.exports = { sendVerificationEmail }
