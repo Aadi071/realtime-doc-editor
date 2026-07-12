@@ -13,28 +13,40 @@
 // step. It won't scale past ~500 messages/day and isn't meant for
 // production volume, but that's well beyond what this app needs.
 const nodemailer = require('nodemailer')
+const dns = require('dns')
 
-const transporter =
-  process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD
-    ? nodemailer.createTransport({
-        // Spelled out explicitly (instead of the `service: 'gmail'`
-        // shorthand) so we can pin `family: 4` below - Railway's network
-        // resolves smtp.gmail.com to an IPv6 address it has no route to,
-        // and that ENETUNREACH doesn't fail fast, it eats the whole
-        // connectionTimeout before nodemailer gives up on it. `family: 4`
-        // skips straight to an IPv4 address instead of ever trying IPv6.
-        //
-        // Port 465 (implicit TLS) still hung for the full connectionTimeout
-        // on Railway even with family:4 forcing an IPv4 address - that
-        // points at Railway blocking/dropping outbound :465 specifically,
-        // not a DNS/address-family issue. Trying port 587 (STARTTLS:
-        // connect in plaintext, then upgrade) since hosts that block
-        // implicit-TLS SMTP often leave the submission port open.
-        host: 'smtp.gmail.com',
+// Nodemailer's `family: 4` option (tried on both port 465 and port 587)
+// did NOT reliably force an IPv4 connection on Railway - the logs still
+// showed `connect ENETUNREACH` against an IPv6 address for
+// smtp.gmail.com, meaning `family` wasn't actually reaching the layer
+// that opens the socket. Resolving the IPv4 address ourselves and
+// connecting to that literal IP sidesteps whatever wasn't honoring
+// `family`, and guarantees an IPv4 socket regardless. `tls.servername`
+// is set explicitly so TLS certificate hostname verification still
+// checks against "smtp.gmail.com" instead of the raw IP.
+let transporterPromise = null
+
+function getTransporter() {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+    return Promise.resolve(null)
+  }
+  if (transporterPromise) return transporterPromise
+
+  transporterPromise = dns.promises
+    .lookup('smtp.gmail.com', { family: 4 })
+    .then(({ address }) => address)
+    .catch((err) => {
+      console.error('[email] failed to resolve smtp.gmail.com to an IPv4 address, falling back to hostname:', err.message)
+      return 'smtp.gmail.com'
+    })
+    .then((host) =>
+      nodemailer.createTransport({
+        host,
         port: 587,
         secure: false,
         requireTLS: true,
         family: 4,
+        tls: { servername: 'smtp.gmail.com' },
         auth: {
           user: process.env.GMAIL_USER,
           pass: process.env.GMAIL_APP_PASSWORD, // a Gmail App Password, NOT your account password
@@ -47,9 +59,13 @@ const transporter =
         greetingTimeout: 10_000,
         socketTimeout: 10_000,
       })
-    : null
+    )
+
+  return transporterPromise
+}
 
 async function sendVerificationEmail(toEmail, code) {
+  const transporter = await getTransporter()
   if (!transporter) {
     console.log(`[email] GMAIL_USER/GMAIL_APP_PASSWORD not set - verification code for ${toEmail}: ${code}`)
     return
