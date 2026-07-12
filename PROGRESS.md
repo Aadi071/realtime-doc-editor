@@ -666,23 +666,220 @@ meant for production volume, but that's well beyond this app's needs.
   file (via Read/Write/Edit) is the authoritative source, the sandboxed
   bash mount view was stale/desynced and not trustworthy for this repo.
 
-## Queued for next session (Anty flagged these, not started)
+## Queued items from last session - all resolved
 
-1. **Document templates on create** - let users pick a starter template
-   (blank, meeting notes, project brief, etc.) instead of always starting
-   from an empty document. Needs a template picker in `DocumentList.tsx`'s
-   create flow, plus a way to seed the chosen template's content into the
-   new document's Yjs state at creation time.
-2. **Login not working on the deployed app** - reported broken on both
-   `rtedtr.vercel.app` and `realtime-doc-editor-seven.vercel.app`. Not yet
-   investigated. Worth checking after the pending backend redeploy lands
-   (lockfile fix + multi-origin CORS_ORIGIN change) in case that was the
-   actual cause, but don't assume it without checking - could be a
-   JWT/cookie issue or something else entirely.
-3. **LaTeX/math support** - "if I can" - scope out a Tiptap extension for
-   LaTeX/math rendering (KaTeX-based ones are the usual choice), inline
-   and/or block. Check compatibility with the existing Yjs `Collaboration`
-   extension setup before committing to an implementation approach.
+All 3 items queued at the end of the previous session were picked up and
+closed out. See the sections below for the full story of each.
+
+1. ~~Document templates on create~~ - DONE, see "Document templates
+   (completed)" below.
+2. ~~Login not working on the deployed app~~ - RESOLVED, but the actual
+   cause was different from what was suspected (not JWT/cookie/CORS at
+   all). Root cause: email delivery was broken (Railway blocks outbound
+   SMTP entirely, see below), so nobody could receive a verification code
+   to finish signing up - "login not working" was really "nobody can get
+   past the verification step that's silently failing." Confirmed once
+   email verification was removed entirely: signup/login started working
+   immediately, no code path changes needed beyond removing verification
+   itself.
+3. ~~LaTeX/math support~~ - DONE, see "LaTeX/math support (completed)"
+   below.
+
+## Email verification: SMTP death spiral -> removed for now
+
+Anty asked to get email verification actually working in production (the
+Gmail SMTP version from the previous session had never been confirmed
+working on Railway). What actually happened, in order:
+
+1. **Diagnosed Railway blocks outbound SMTP entirely** - not a
+   config/DNS issue. Tried port 465 (implicit TLS): `ENETUNREACH` on an
+   IPv6 address despite `family: 4` being passed to nodemailer (turned out
+   `family` isn't reliably honored by nodemailer/smtp-connection). Fixed
+   that by manually resolving `smtp.gmail.com` to a literal IPv4 address
+   via `dns.promises.lookup(host, {family:4})` and connecting to that
+   address directly with `tls.servername` set for correct cert
+   validation - and STILL got a bare `Connection timeout` on port 587
+   (STARTTLS) even with a correct IPv4 address and no DNS ambiguity left.
+   Two independent failure modes on two different ports, both pointing at
+   the same conclusion: this is Railway's network policy, not something
+   client code can work around.
+2. **Switched to SendGrid's HTTP Mail Send API** (`server/src/email.js`
+   rewritten to use native `fetch`, no new npm dependency) - HTTPS on
+   port 443 isn't blocked, and SendGrid's Single Sender Verification
+   (verify one email address, no domain/DNS needed) is enough for a
+   portfolio app. This version worked and was fully wired up
+   (`SENDGRID_API_KEY`/`SENDGRID_FROM_EMAIL` env vars).
+3. **Anty then explicitly decided to drop email verification entirely
+   "for the time being"** rather than finish deploying the SendGrid
+   version - simpler to reason about, one less moving piece, revisit
+   later if wanted. Reverted `server/src/routes/auth.js` to the
+   pre-verification shape: `POST /signup` creates the user with
+   `email_verified = true` immediately and returns a token straight away
+   (no code, no separate verify step). Removed `/verify-email` and
+   `/resend-code` routes entirely. `frontend/src/Login.tsx`'s `'verify'`
+   mode was removed - `Mode` is back to just `'login' | 'signup'`, both
+   call `onAuthed()` directly on success.
+4. **What's still around, deliberately**: the `users` table still has
+   `email_verified`/`email_verification_code`/
+   `email_verification_expires_at` columns (`server/db/init/001_schema.sql`)
+   - unused now (always `true`/`null`), left in place rather than
+   migrating them out, since dropping columns on the live Railway Postgres
+   for a cosmetic cleanup wasn't worth the risk. The full working SendGrid
+   implementation is preserved in git history at commit `03c89ab` if email
+   verification comes back - `server/src/email.js` itself was later
+   deleted as dead code (see "Cleanup pass" below) since nothing imports
+   it anymore, but the git history means it's a `git show 03c89ab:server/
+   src/email.js` away from being restored.
+
+## Document templates (completed)
+
+`DocumentList.tsx`'s create flow now shows a row of template pills
+(Blank, Meeting notes, To-do list, Project brief) below the title input.
+Entirely client-side - there's no server/DB concept of a "template" at
+all:
+
+- `frontend/src/templates.ts` (new) - exports `TEMPLATES`, each one just
+  an HTML string (using Tiptap's task-list markup for the checkable
+  items) plus an id/name/description.
+- `DocumentList.tsx` - picks a template alongside the title, and after a
+  successful `POST /api/documents`, passes the chosen template's HTML up
+  through a new second argument on `onOpen(doc, templateHtml?)`.
+- `App.tsx` - new `pendingTemplateHtml` state, threaded into
+  `DocumentEditor` as a new `initialContentHtml` prop. Reset to `null` on
+  every other document open (opening an existing doc from the list never
+  passes a second argument), so it can only ever apply to the document
+  that was JUST created in that same action.
+- `DocumentEditor.tsx` - a new effect calls `editor.commands.setContent
+  (initialContentHtml)` exactly once, gated on `role === 'owner'` AND
+  `editor.isEmpty`, via a `useRef` guard - this is what prevents a race
+  where a collaborator opening the same brand-new document a moment later
+  would insert their own copy of the template on top of the owner's.
+  Because it's just inserted as a normal Yjs edit, sync/persistence/
+  version history all work on template content the same as anything else,
+  zero server changes needed.
+
+## LaTeX/math support (completed)
+
+Anty's actual ask was inline typing - type LaTeX syntax directly into the
+document like you would in a `.tex` file, not just a toolbar
+prompt-and-insert flow.
+
+- Added `@aarkue/tiptap-math-extension`, **pinned to 1.3.6** specifically
+  - this is the last version compatible with Tiptap 2.x; 1.4.0+ requires
+    Tiptap 3.x, which this project isn't on. Renders via KaTeX (`katex`
+    added, `katex/dist/katex.min.css` imported in `DocumentEditor.tsx`).
+- Typing `$x^2+y^2=z^2$` (or any `$...$`) directly in the document
+  auto-converts to rendered math live, via the extension's own Tiptap
+  input rule - confirmed working end-to-end on the deployed site.
+- Also added a toolbar button (Σ icon) for people who'd rather not
+  type the raw syntax: `insertMath()` prompts for LaTeX via
+  `window.prompt()`, then manually constructs and inserts an `inlineMath`
+  node via `editor.chain().focus().insertContent(...)`. This had to be
+  done manually rather than simulating the typed `$...$` shortcut,
+  because Tiptap input rules only fire on real keystroke DOM events, not
+  on programmatic `insertContent()` calls.
+- New CSS in `index.css`: `.tiptap-math.latex`/`.tiptap-math.result`.
+- Works over the existing Yjs `Collaboration` setup with zero server
+  changes - it's just another ProseMirror schema node, syncs the same way
+  task-list nodes (from templates, above) do.
+
+## Deployment stopped auto-deploying: git-author-email block (found + fixed)
+
+After all of the above was pushed, none of it showed up on the live site
+(`rtedtr.vercel.app` kept serving an 18-hour-old bundle - confirmed by
+diffing the deployed JS bundle's size/contents against a local build).
+Root cause, found in the Vercel dashboard's deployment detail page:
+**every single deployment from that day had status "Blocked"**, with the
+message *"The deployment was blocked because the commit email
+aadi42527@gmail.com could not be matched to a GitHub account."* This is a
+Vercel security feature - it refuses to deploy a commit whose author
+email isn't a verified email on the GitHub account doing the push.
+
+This almost certainly explains queued item #2 from last session too
+("login not working") in combination with the SMTP issue above - some
+number of Anty's own pushes had likely been silently blocked before this
+was ever noticed, since Vercel doesn't email/alert about a blocked
+deployment, it just quietly doesn't deploy.
+
+Fix: Anty added `aadi42527@gmail.com` as a verified secondary email on
+the `Aadi071` GitHub account (github.com/settings/emails). That alone
+doesn't retroactively unblock already-blocked deployments, so a small
+follow-up commit was pushed to trigger a fresh deploy attempt, which went
+**Ready** in 13 seconds and promoted straight to Production. Confirmed
+live: template pills and inline LaTeX both work on `rtedtr.vercel.app`.
+
+No code changes were needed for this fix at all - it was entirely a
+GitHub account settings issue, unrelated to anything in the app.
+
+## Cleanup pass (dead code, lockfiles, sandbox git cruft)
+
+Once things were working, did a pass to remove what the SMTP/SendGrid
+saga left behind:
+
+- Deleted `server/src/email.js` (the SendGrid HTTP-API helper) - nothing
+  imports it anymore since verification was removed. Full implementation
+  still recoverable from git history (commit `03c89ab`).
+- Removed the now-unused `nodemailer` dependency from
+  `server/package.json`, regenerated `server/package-lock.json` to match
+  (`npm install --package-lock-only`, confirmed `nodemailer` fully gone
+  from the lockfile).
+- Added `vite.config.js.timestamp-*.mjs` to `frontend/.gitignore` - these
+  are Vite dev-server temp files that occasionally leak instead of
+  self-deleting; harmless, but were showing up as untracked noise.
+- Cleaned up a messy local git index (stale renamed/deleted entries left
+  over from earlier in-session git-plumbing workarounds around the
+  sandbox's file-permission restrictions) - this was purely a local
+  working-copy issue, never affected what was actually pushed to GitHub.
+- Rewrote `server/.env.example`'s Gmail SMTP section to reflect that
+  email verification is off and no env vars are currently needed for
+  auth, with a pointer to the SendGrid version in git history if it comes
+  back.
+- **Two files could NOT be deleted** - the sandbox's mount has a
+  persistent permission restriction on files it already touched this
+  session, so `rm` fails with `Operation not permitted` even after
+  retrying at the end of the session:
+  - `server/src/email.js` (now untracked in git, safe to delete manually)
+  - the several `frontend/vite.config.js.timestamp-*.mjs` files
+    (untracked, gitignored now, safe to delete manually)
+  Anty can delete both directly in Windows Explorer whenever convenient -
+  they're harmless either way since they're no longer tracked/referenced.
+
+## Full collaboration QA pass #2 (post-fix verification)
+
+Ran a fresh end-to-end pass on the live deployed site (not localhost)
+after the deploy-block fix, using two real accounts via two browser tabs
+(Claude in Chrome), same methodology as the previous session's regression
+pass:
+
+- Two tabs on the same document, same account: typed in one, appeared
+  instantly in the other with a live cursor label showing the email.
+  Typed in both simultaneously - both edits merged correctly with no
+  conflict (Yjs CRDT). PASS.
+- Presence avatars: correctly showed 2 circles while both tabs were
+  connected, dropped to 1 when a tab navigated away. PASS.
+- Sharing: inviting an email with no account correctly errors ("no
+  account exists for..."); after that account signs up (instant, no
+  verification step - confirms the removal from above), sharing succeeds
+  and the doc appears in their list with the right role badge. PASS.
+- Viewer role is enforced at the editor level, not just visually - typed
+  text never actually landed in the document, confirmed by checking the
+  owner's tab showed no change. PASS.
+- Promoting an existing collaborator viewer -> editor via the
+  `SharesManager` dropdown updates the backend immediately (toast
+  confirms), and the other person picks it up on their next reconnect/
+  reload (this matches the documented design - role changes are a 5s
+  poll, not a push, per last session's notes above). Once picked up, they
+  could edit immediately and it synced live. PASS.
+- Revoking access via the same panel worked cleanly, confirmed via the
+  toast and the collaborator disappearing from the shares list.
+- Templates: created a "Meeting notes" document, confirmed the seeded
+  heading/date/agenda/notes/action-items structure, and the checkable
+  task-list checkbox actually toggles. PASS.
+- Inline LaTeX: typed `$x^2+y^2=z^2$` directly into a template document,
+  confirmed it rendered as proper KaTeX math live, no toolbar needed.
+  PASS.
+- Test artifacts (the second test account's share) were revoked/cleaned
+  up afterward so Anty's real account's document list stayed tidy.
 
 ## Resume instructions for next session
 
@@ -690,8 +887,20 @@ meant for production volume, but that's well beyond this app's needs.
 2. Spot-check a couple of key files against this description if picking
    up serious new work (`server/src/server.js`, `frontend/src/
    DocumentEditor.tsx`) in case Anty made further edits between sessions.
-3. Ask what Anty wants to do next - the "not started" list above is a
-   reasonable set of options to offer, but don't assume; ask.
+3. Nothing is currently blocked or broken - templates, LaTeX, sharing/
+   roles, and real-time sync are all confirmed working on the live
+   deployed site as of this note. Reasonable options to offer for next
+   session (don't assume, ask):
+   - Re-add email verification via the SendGrid implementation already
+     sitting in git history (commit `03c89ab`), now that Railway's SMTP
+     block is a known, documented dead end.
+   - `Y.UndoManager`-based collaborative undo/redo (still an open
+     question from an earlier session - see the extra-features section
+     above).
+   - The two locked local files flagged in "Cleanup pass" above still
+     need manual deletion by Anty (harmless either way, just tidiness).
+   - General UI/visual polish - was explicitly deferred until after
+     deployment, which is long done now.
 4. Keep using direct file edits (not chat-displayed code) unless Anty asks
    to switch back.
 5. Update this file again at the end of the session.
