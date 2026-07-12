@@ -133,3 +133,5 @@ server.on('upgrade', async (request, socket, head) => {
     console.log(`Server (REST + WebSocket) listening on http://localhost:${PORT}`)
   })
 })()
+
+// redeploy trigger: git author email fixed on GitHub
