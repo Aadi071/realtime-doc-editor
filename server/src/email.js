@@ -23,9 +23,17 @@ const transporter =
         // and that ENETUNREACH doesn't fail fast, it eats the whole
         // connectionTimeout before nodemailer gives up on it. `family: 4`
         // skips straight to an IPv4 address instead of ever trying IPv6.
+        //
+        // Port 465 (implicit TLS) still hung for the full connectionTimeout
+        // on Railway even with family:4 forcing an IPv4 address - that
+        // points at Railway blocking/dropping outbound :465 specifically,
+        // not a DNS/address-family issue. Trying port 587 (STARTTLS:
+        // connect in plaintext, then upgrade) since hosts that block
+        // implicit-TLS SMTP often leave the submission port open.
         host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
+        port: 587,
+        secure: false,
+        requireTLS: true,
         family: 4,
         auth: {
           user: process.env.GMAIL_USER,
@@ -52,16 +60,4 @@ async function sendVerificationEmail(toEmail, code) {
       from: `RTEDTR <${process.env.GMAIL_USER}>`,
       to: toEmail,
       subject: 'Verify your email',
-      html: `<p>Your verification code is:</p><h2>${code}</h2><p>This code expires in 15 minutes.</p>`,
-    })
-
-    console.log(`[email] sent verification code to ${toEmail} (message id: ${info.messageId})`)
-  } catch (err) {
-    // Don't let an email-provider hiccup break signup entirely - log it
-    // and also print the code, so local testing/demoing can still proceed.
-    console.error(`[email] failed to send to ${toEmail}:`, err.message)
-    console.log(`[email] verification code for ${toEmail} was: ${code}`)
-  }
-}
-
-module.exports = { sendVerificationEmail }
+      html: `<p>Your verification code is:</p><h2>${code}</h2><p>This code expires in 15 minutes.</p>
