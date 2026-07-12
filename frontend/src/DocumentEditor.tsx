@@ -7,6 +7,10 @@ import Underline from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
+import MathExtension from '@aarkue/tiptap-math-extension'
+// KaTeX only ships CSS for rendering the math it draws - there's no JS
+// runtime dependency beyond what MathExtension already bundles.
+import 'katex/dist/katex.min.css'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import VersionHistory from './VersionHistory'
@@ -32,6 +36,7 @@ import {
   Eraser,
   Image as ImageIcon,
   PenLine,
+  Sigma,
   Undo2,
   Redo2,
   Check,
@@ -92,6 +97,23 @@ function setLink(editor: ToolbarEditor) {
     return
   }
   editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+}
+
+// Inserting the math node directly (rather than typing "$x^2$" and relying
+// on MathExtension's input rule) sidesteps a real limitation: ProseMirror's
+// input rules only fire on actual keystrokes reaching the DOM, not on
+// programmatic content insertion - so a toolbar button couldn't trigger the
+// same auto-conversion typing does. Building the `inlineMath` node by hand
+// here gets the identical rendered result either way. Typing "$...$"
+// directly in the document still works too - this button is just a more
+// discoverable alternative for anyone who doesn't know that shortcut.
+function insertMath(editor: ToolbarEditor) {
+  const latex = window.prompt(
+    String.raw`LaTeX expression (e.g. x^2+1, \frac{1}{2}, \sqrt{x}, \sum_{i=1}^n i)`,
+    'x^2',
+  )
+  if (!latex) return // cancelled or left empty
+  editor.chain().focus().insertContent({ type: 'inlineMath', attrs: { latex } }).run()
 }
 
 // Grouped like a Word/Google Docs ribbon: text style, headings, lists,
@@ -267,6 +289,9 @@ function Toolbar({
         </ToolbarButton>
         <ToolbarButton title="Draw" onClick={onDrawClick}>
           <PenLine size={16} />
+        </ToolbarButton>
+        <ToolbarButton title="Insert math (LaTeX)" onClick={() => insertMath(editor)}>
+          <Sigma size={16} />
         </ToolbarButton>
       </div>
     </div>
@@ -459,6 +484,11 @@ export default function DocumentEditor({
         TextAlign.configure({ types: ['heading', 'paragraph'] }),
         Link.configure({ openOnClick: false, autolink: true }),
         Image,
+        // `evaluation: true` is a small bonus on top of just rendering
+        // LaTeX: expressions ending in "=" (e.g. "$2*3=$") show their
+        // computed result inline, and "x := 5" style assignments let later
+        // expressions in the same document reference that variable.
+        MathExtension.configure({ evaluation: true }),
         // Only add cursor rendering once the provider exists - Tiptap
         // extensions are set once when the editor is created, so this
         // waits for `provider` to be ready via the dependency array below.

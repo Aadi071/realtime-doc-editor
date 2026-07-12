@@ -239,6 +239,25 @@ body {
   border-radius: 4px;
 }
 
+/* Rendered by @aarkue/tiptap-math-extension (via KaTeX) for each inline
+   math node. KaTeX's own glyphs already inherit `color` from their
+   surroundings, so this is just a subtle pill background to make math
+   visually distinct from plain text, matching `.ProseMirror code`'s
+   treatment elsewhere in the app. */
+.tiptap-math.latex {
+  display: inline-block;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.tiptap-math.result {
+  margin-left: 4px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .ProseMirror img.ProseMirror-selectednode {
   outline: 2px solid var(--accent);
 }
