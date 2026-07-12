@@ -17,15 +17,24 @@ const nodemailer = require('nodemailer')
 const transporter =
   process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD
     ? nodemailer.createTransport({
-        service: 'gmail',
+        // Spelled out explicitly (instead of the `service: 'gmail'`
+        // shorthand) so we can pin `family: 4` below - Railway's network
+        // resolves smtp.gmail.com to an IPv6 address it has no route to,
+        // and that ENETUNREACH doesn't fail fast, it eats the whole
+        // connectionTimeout before nodemailer gives up on it. `family: 4`
+        // skips straight to an IPv4 address instead of ever trying IPv6.
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        family: 4,
         auth: {
           user: process.env.GMAIL_USER,
           pass: process.env.GMAIL_APP_PASSWORD, // a Gmail App Password, NOT your account password
         },
-        // Belt-and-suspenders on top of the process-wide ipv4first DNS
-        // ordering in server.js: if a connection attempt is ever going to
-        // fail (bad network, Gmail hiccup, etc.) it should fail within a
-        // few seconds, not hang and turn signup into a multi-minute wait.
+        // Belt-and-suspenders: if a connection attempt is ever going to
+        // fail for some other reason (bad network, Gmail hiccup, etc.) it
+        // should fail within a few seconds, not hang and turn signup into
+        // a multi-minute wait.
         connectionTimeout: 10_000,
         greetingTimeout: 10_000,
         socketTimeout: 10_000,
