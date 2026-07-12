@@ -20,6 +20,17 @@ export default function App() {
     return saved ? JSON.parse(saved) : null
   })
   const [openDoc, setOpenDoc] = useState<DocSummary | null>(null)
+  // Only set for a document that was JUST created with a non-blank
+  // template picked in DocumentList - see templates.ts. Reopening any
+  // document from the list (including this one, later) always goes through
+  // handleOpenDoc(doc) with no second argument, which resets this back to
+  // null before the editor for that document mounts.
+  const [pendingTemplateHtml, setPendingTemplateHtml] = useState<string | null>(null)
+
+  function handleOpenDoc(doc: DocSummary, templateHtml?: string) {
+    setPendingTemplateHtml(templateHtml ?? null)
+    setOpenDoc(doc)
+  }
   // null = show the Home landing page (logged-out only). Set to 'login' or
   // 'signup' once someone picks a CTA - Login.tsx reads this once as its
   // initialMode, so switching between the two re-mounts Login fresh rather
@@ -133,10 +144,11 @@ export default function App() {
                 title={openDoc.title}
                 token={token}
                 userEmail={user.email}
+                initialContentHtml={pendingTemplateHtml}
               />
             </div>
           ) : (
-            <DocumentList token={token} onOpen={setOpenDoc} />
+            <DocumentList token={token} onOpen={handleOpenDoc} />
           )}
         </main>
       )}
@@ -145,7 +157,7 @@ export default function App() {
         <CommandPalette
           token={token}
           hasOpenDoc={!!openDoc}
-          onOpenDoc={setOpenDoc}
+          onOpenDoc={handleOpenDoc}
           onBackToList={() => setOpenDoc(null)}
           onLogout={logOut}
         />

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { FileText, Plus } from 'lucide-react'
 import { DOCUMENTS_API_URL as API_URL } from './config'
+import { TEMPLATES } from './templates'
 
 export type DocSummary = {
   id: string
@@ -21,10 +22,14 @@ export default function DocumentList({
   onOpen,
 }: {
   token: string
-  onOpen: (doc: DocSummary) => void
+  // templateHtml is only ever passed for a document JUST created here, with
+  // a non-blank template selected - see templates.ts. Opening an existing
+  // document from the list below always omits it.
+  onOpen: (doc: DocSummary, templateHtml?: string) => void
 }) {
   const [docs, setDocs] = useState<DocSummary[]>([])
   const [newTitle, setNewTitle] = useState('')
+  const [templateId, setTemplateId] = useState(TEMPLATES[0].id)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -69,9 +74,11 @@ export default function DocumentList({
     }
 
     const doc = data as DocSummary
+    const template = TEMPLATES.find((t) => t.id === templateId)
     setNewTitle('')
+    setTemplateId(TEMPLATES[0].id)
     await loadDocs()
-    onOpen(doc)
+    onOpen(doc, template?.html)
   }
 
   return (
@@ -82,23 +89,43 @@ export default function DocumentList({
         <p className="mb-4 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">{error}</p>
       )}
 
-      <form onSubmit={createDoc} className="mb-6 flex gap-2">
-        <input
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          placeholder="New document title"
-          className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px]
-            text-[var(--text)] outline-none transition-shadow duration-200 placeholder:text-[var(--text-muted)]
-            focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]"
-        />
-        <button
-          type="submit"
-          className="ease-smooth flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-[15px]
-            font-medium text-[var(--accent-contrast)] transition-all duration-200 hover:opacity-90 active:scale-[0.98]"
-        >
-          <Plus size={16} />
-          Create
-        </button>
+      <form onSubmit={createDoc} className="mb-6">
+        <div className="flex gap-2">
+          <input
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="New document title"
+            className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px]
+              text-[var(--text)] outline-none transition-shadow duration-200 placeholder:text-[var(--text-muted)]
+              focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)]"
+          />
+          <button
+            type="submit"
+            className="ease-smooth flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-[15px]
+              font-medium text-[var(--accent-contrast)] transition-all duration-200 hover:opacity-90 active:scale-[0.98]"
+          >
+            <Plus size={16} />
+            Create
+          </button>
+        </div>
+
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {TEMPLATES.map((template) => (
+            <button
+              key={template.id}
+              type="button"
+              title={template.description}
+              onClick={() => setTemplateId(template.id)}
+              className={`ease-smooth rounded-full border px-3 py-1 text-xs font-medium transition-colors duration-150 ${
+                templateId === template.id
+                  ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
+                  : 'border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)] hover:text-[var(--text)]'
+              }`}
+            >
+              {template.name}
+            </button>
+          ))}
+        </div>
       </form>
 
       {loading ? (
