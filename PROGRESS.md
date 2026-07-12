@@ -612,6 +612,78 @@ reliable, no external dependency); chose simulated.
   collaborative freehand drawing (vs. the current sketch-then-insert-as-
   static-image approach).
 
+## Deployment (completed)
+
+Backend deployed to Railway (`realtime-doc-editor-production.up.railway.app`,
+root directory `/server`, deploy branch `development` after correcting an
+initial mis-deploy from stale `master`), Postgres + Redis provisioned
+alongside it. Frontend deployed to Vercel
+(`realtime-doc-editor-seven.vercel.app`, root directory `frontend`,
+production branch also switched to `development`). `VITE_API_URL`/
+`VITE_WS_URL` point at the Railway domain; `CORS_ORIGIN` on Railway points
+back at the Vercel domain. Verified end-to-end: homepage loads with no
+console errors, the built JS has the correct backend URL baked in, and a
+live cross-origin fetch from the Vercel domain to the Railway backend
+succeeded (confirms CORS is wired correctly both ways). Hit and fixed one
+real build bug along the way: `frontend/src/vite-env.d.ts` was missing
+(the standard Vite reference file that types `import.meta.env`), so
+`tsc -b` failed the Vercel build on `config.ts`'s `VITE_API_URL`/
+`VITE_WS_URL` reads even though it worked fine locally in dev mode (Vite's
+dev server doesn't type-check the way `tsc -b` does at build time).
+
+## Email provider: Resend -> Gmail SMTP
+
+Anty reported Resend "not working for mails" post-deploy. Root cause: the
+sandbox sender (`onboarding@resend.dev`) can only deliver to the email
+address the Resend account itself was created with, until a sending domain
+is verified - documented in the code's own comments, and true of every
+transactional-email provider (Postmark, SendGrid, Mailgun, Brevo,
+MailerSend), not a Resend-specific flaw. Anty doesn't have a domain to
+verify, so recommended and implemented Gmail SMTP via `nodemailer` instead:
+sends as a real Gmail address, delivers to any real inbox immediately, no
+verification step, free. Won't scale past ~500 messages/day and isn't
+meant for production volume, but that's well beyond this app's needs.
+
+- `server/src/email.js` rewritten: swapped the Resend SDK for
+  `nodemailer.createTransport({ service: 'gmail', auth: {...} })`. Same
+  exported `sendVerificationEmail(toEmail, code)` signature, so
+  `server/src/routes/auth.js` (the only caller) needed zero changes.
+  Falls back to console-logging the code if `GMAIL_USER`/
+  `GMAIL_APP_PASSWORD` aren't set, same pattern as before.
+- `server/package.json` - removed `resend`, added `nodemailer`.
+- `server/.env.example` - `RESEND_API_KEY`/`RESEND_FROM` replaced with
+  `GMAIL_USER`/`GMAIL_APP_PASSWORD`, with a note that the latter is a
+  Gmail *App Password* (generated at
+  `myaccount.google.com/apppasswords`, requires 2-Step Verification
+  enabled first), not the account's real password.
+- Not yet done: Anty needs to generate the App Password themselves and add
+  `GMAIL_USER`/`GMAIL_APP_PASSWORD` to Railway's Variables tab (same
+  boundary as `RESEND_API_KEY` before it - entering credentials into forms
+  isn't something Claude does, even the user's own infrastructure), then
+  redeploy the backend service. Also hit the same git-lock-file/mount
+  delete-restriction issue as earlier in this session when trying to
+  verify `npm install` locally via the sandbox's bash tool - the Windows
+  file (via Read/Write/Edit) is the authoritative source, the sandboxed
+  bash mount view was stale/desynced and not trustworthy for this repo.
+
+## Queued for next session (Anty flagged these, not started)
+
+1. **Document templates on create** - let users pick a starter template
+   (blank, meeting notes, project brief, etc.) instead of always starting
+   from an empty document. Needs a template picker in `DocumentList.tsx`'s
+   create flow, plus a way to seed the chosen template's content into the
+   new document's Yjs state at creation time.
+2. **Login not working on the deployed app** - reported broken on both
+   `rtedtr.vercel.app` and `realtime-doc-editor-seven.vercel.app`. Not yet
+   investigated. Worth checking after the pending backend redeploy lands
+   (lockfile fix + multi-origin CORS_ORIGIN change) in case that was the
+   actual cause, but don't assume it without checking - could be a
+   JWT/cookie issue or something else entirely.
+3. **LaTeX/math support** - "if I can" - scope out a Tiptap extension for
+   LaTeX/math rendering (KaTeX-based ones are the usual choice), inline
+   and/or block. Check compatibility with the existing Yjs `Collaboration`
+   extension setup before committing to an implementation approach.
+
 ## Resume instructions for next session
 
 1. Read this file fully, then skim README.md.
