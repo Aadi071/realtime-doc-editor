@@ -22,6 +22,13 @@ const transporter =
           user: process.env.GMAIL_USER,
           pass: process.env.GMAIL_APP_PASSWORD, // a Gmail App Password, NOT your account password
         },
+        // Belt-and-suspenders on top of the process-wide ipv4first DNS
+        // ordering in server.js: if a connection attempt is ever going to
+        // fail (bad network, Gmail hiccup, etc.) it should fail within a
+        // few seconds, not hang and turn signup into a multi-minute wait.
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 10_000,
       })
     : null
 

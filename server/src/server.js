@@ -11,6 +11,16 @@
 
 require('dotenv').config()
 
+// Railway's network (and many other cloud hosts) advertises IPv6 DNS
+// records for external services like Gmail's SMTP servers but doesn't
+// actually have a working IPv6 route out of the container. Node's default
+// DNS ordering tries whatever the resolver returns first, which is often
+// the IPv6 address - that connection attempt doesn't fail fast, it hangs
+// until it exhausts its own retries before falling back to IPv4, which is
+// exactly what was turning every signup into a ~2 minute wait. Preferring
+// IPv4 results for all DNS lookups in this process avoids that entirely.
+require('dns').setDefaultResultOrder('ipv4first')
+
 const http = require('http')
 const express = require('express')
 const cors = require('cors')
