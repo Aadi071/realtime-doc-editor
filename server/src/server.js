@@ -108,4 +108,18 @@ server.on('upgrade', async (request, socket, head) => {
   }
 })
 
-// Make sure the schema exists before accepting any traffic -
+// Make sure the schema exists before accepting any traffic - see
+// ensureSchema.js for why this is needed on top of db/init/001_schema.sql.
+;(async () => {
+  try {
+    await ensureSchema()
+  } catch (err) {
+    console.error('[db] failed to ensure schema:', err)
+    process.exit(1)
+    return
+  }
+
+  server.listen(PORT, () => {
+    console.log(`Server (REST + WebSocket) listening on http://localhost:${PORT}`)
+  })
+})()
