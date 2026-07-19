@@ -7,6 +7,12 @@ import Underline from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
+import MathExtension from '@aarkue/tiptap-math-extension'
+// KaTeX only ships CSS for rendering the math it draws - there's no JS
+// runtime dependency beyond what MathExtension already bundles.
+import 'katex/dist/katex.min.css'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import VersionHistory from './VersionHistory'
@@ -32,6 +38,11 @@ import {
   Eraser,
   Image as ImageIcon,
   PenLine,
+  Sigma,
+  Undo2,
+  Redo2,
+  Check,
+  Loader2,
 } from 'lucide-react'
 
 // 'owner' | 'editor' | 'viewer' = a confirmed role.
@@ -90,6 +101,23 @@ function setLink(editor: ToolbarEditor) {
   editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
 }
 
+// Inserting the math node directly (rather than typing "$x^2$" and relying
+// on MathExtension's input rule) sidesteps a real limitation: ProseMirror's
+// input rules only fire on actual keystrokes reaching the DOM, not on
+// programmatic content insertion - so a toolbar button couldn't trigger the
+// same auto-conversion typing does. Building the `inlineMath` node by hand
+// here gets the identical rendered result either way. Typing "$...$"
+// directly in the document still works too - this button is just a more
+// discoverable alternative for anyone who doesn't know that shortcut.
+function insertMath(editor: ToolbarEditor) {
+  const latex = window.prompt(
+    String.raw`LaTeX expression (e.g. x^2+1, \frac{1}{2}, \sqrt{x}, \sum_{i=1}^n i)`,
+    'x^2',
+  )
+  if (!latex) return // cancelled or left empty
+  editor.chain().focus().insertContent({ type: 'inlineMath', attrs: { latex } }).run()
+}
+
 // Grouped like a Word/Google Docs ribbon: text style, headings, lists,
 // alignment, link, then a "clear formatting" escape hatch. The toolbar's
 // own CSS (see index.css: `.toolbar { position: sticky; top: 0 }`) is what
@@ -108,6 +136,29 @@ function Toolbar({
 
   return (
     <div className="toolbar">
+      {/* Collaboration extension ships its own history implementation (a
+          Yjs-aware UndoManager under the hood) whenever StarterKit's own
+          history is disabled - see `StarterKit.configure({ history: false })`
+          below. That means editor.commands.undo()/redo() and the Ctrl+Z /
+          Ctrl+Y keyboard shortcuts already work with zero extra wiring;
+          these are just visible buttons for the same built-in commands. */}
+      <div className="toolbar-group">
+        <ToolbarButton
+          title="Undo (Ctrl+Z)"
+          disabled={!editor.can().undo()}
+          onClick={() => editor.chain().focus().undo().run()}
+        >
+          <Undo2 size={16} />
+        </ToolbarButton>
+        <ToolbarButton
+          title="Redo (Ctrl+Y)"
+          disabled={!editor.can().redo()}
+          onClick={() => editor.chain().focus().redo().run()}
+        >
+          <Redo2 size={16} />
+        </ToolbarButton>
+      </div>
+
       <div className="toolbar-group">
         <ToolbarButton
           title="Bold (Ctrl+B)"
@@ -241,6 +292,9 @@ function Toolbar({
         <ToolbarButton title="Draw" onClick={onDrawClick}>
           <PenLine size={16} />
         </ToolbarButton>
+        <ToolbarButton title="Insert math (LaTeX)" onClick={() => insertMath(editor)}>
+          <Sigma size={16} />
+        </ToolbarButton>
       </div>
     </div>
   )
@@ -248,22 +302,39 @@ function Toolbar({
 
 type Peer = { clientId: number; name: string; color: string; isMe: boolean }
 
+// Google-Docs-style overlapping circular avatars rather than the old text
+// pills - a ring in the surface color between avatars is what creates the
+// "stacked" look even though each avatar is a plain colored circle.
 function PresenceBar({ peers }: { peers: Peer[] }) {
   if (peers.length === 0) return null
   return (
-    <div className="presence-bar">
+    <div className="flex -space-x-2">
       {peers.map((peer) => (
-        <span
+        <div
           key={peer.clientId}
-          className="presence-badge"
+          title={peer.name + (peer.isMe ? ' (you)' : '')}
           style={{ backgroundColor: peer.color }}
+          className="ease-smooth flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2
+            border-[var(--surface)] text-[11px] font-semibold text-white transition-transform duration-150
+            hover:z-10 hover:scale-110"
         >
-          {peer.name}
-          {peer.isMe ? ' (you)' : ''}
-        </span>
+          {peer.name.charAt(0).toUpperCase()}
+        </div>
       ))}
     </div>
   )
+}
+
+const statusDotClass: Record<string, string> = {
+  connected: 'bg-emerald-500',
+  connecting: 'bg-amber-500',
+  disconnected: 'bg-[var(--danger)]',
+}
+
+const roleBadgeClass: Record<string, string> = {
+  owner: 'bg-[var(--accent-soft)] text-[var(--accent)]',
+  editor: 'bg-[var(--surface-2)] text-[var(--text-muted)]',
+  viewer: 'bg-[var(--surface-2)] text-[var(--text-muted)]',
 }
 
 export default function DocumentEditor({
@@ -271,11 +342,19 @@ export default function DocumentEditor({
   title,
   token,
   userEmail,
+  initialContentHtml,
 }: {
   docId: string
   title: string
   token: string
   userEmail: string
+  // Set only when this document was just created with a non-blank template
+  // (see templates.ts / DocumentList.tsx) - seeded into the editor once,
+  // below, the first time it's confirmed empty. Anyone else who opens this
+  // same document (including the creator, on a later visit) never gets
+  // this prop set, so there's no risk of it re-seeding or clobbering real
+  // content - see the effect below for the "only once, only if empty" guard.
+  initialContentHtml?: string | null
 }) {
   const [ydoc] = useState(() => new Y.Doc())
   const [provider, setProvider] = useState<WebsocketProvider | null>(null)
@@ -284,6 +363,7 @@ export default function DocumentEditor({
   const [peers, setPeers] = useState<Peer[]>([])
   const [drawingOpen, setDrawingOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const appliedTemplateRef = useRef(false)
 
   // Fetch OUR role on this document, then keep polling it every few
   // seconds. This is how a role CHANGE (e.g. an owner switching someone
@@ -380,6 +460,32 @@ export default function DocumentEditor({
     return () => provider.awareness.off('change', updatePeers)
   }, [provider])
 
+  // Google-Docs-style "Saved"/"Saving…" indicator. NOTE: this is an
+  // approximation, not a real save confirmation - the server (see
+  // server/src/persistence.js) debounces its actual Postgres write by 2s
+  // after the last edit, but never tells connected clients when that write
+  // completes; there's no such message in the y-websocket protocol we're
+  // using. So instead we mirror the same timing client-side: any change to
+  // the document (ours or a collaborator's - it's the DOCUMENT's saved
+  // state, not personal to whoever's asking) flips this to "Saving…", then
+  // back to "Saved" ~300ms after the server's own debounce window would
+  // have elapsed. Good enough to build user confidence; not a substitute
+  // for an actual ack if that ever matters more (e.g. a "close tab" guard).
+  const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | null>(null)
+  useEffect(() => {
+    const saveTimer = { current: null as number | null }
+    function handleUpdate() {
+      setSaveStatus('saving')
+      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+      saveTimer.current = window.setTimeout(() => setSaveStatus('saved'), 2300)
+    }
+    ydoc.on('update', handleUpdate)
+    return () => {
+      ydoc.off('update', handleUpdate)
+      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    }
+  }, [ydoc])
+
   const editor = useEditor(
     {
       extensions: [
@@ -389,6 +495,13 @@ export default function DocumentEditor({
         TextAlign.configure({ types: ['heading', 'paragraph'] }),
         Link.configure({ openOnClick: false, autolink: true }),
         Image,
+        TaskList,
+        TaskItem.configure({ nested: true }),
+        // `evaluation: true` is a small bonus on top of just rendering
+        // LaTeX: expressions ending in "=" (e.g. "$2*3=$") show their
+        // computed result inline, and "x := 5" style assignments let later
+        // expressions in the same document reference that variable.
+        MathExtension.configure({ evaluation: true }),
         // Only add cursor rendering once the provider exists - Tiptap
         // extensions are set once when the editor is created, so this
         // waits for `provider` to be ready via the dependency array below.
@@ -404,6 +517,23 @@ export default function DocumentEditor({
     },
     [ydoc, provider],
   )
+
+  // Seed a template's starter content into a brand-new document, exactly
+  // once. Gated on role === 'owner' (true for whoever just created this
+  // document - see DocumentList.tsx) rather than just "editor is ready", so
+  // this can't fire for someone who opens a shared document a moment after
+  // it was created but before the owner's own seed content has synced -
+  // they should just wait for the real content to arrive over Yjs, not
+  // race to insert their own copy of it. `editor.isEmpty` is the other
+  // half of the guard: if content already exists for any reason, never
+  // overwrite it.
+  useEffect(() => {
+    if (!editor || !initialContentHtml || appliedTemplateRef.current) return
+    if (role !== 'owner') return
+    if (!editor.isEmpty) return
+    appliedTemplateRef.current = true
+    editor.commands.setContent(initialContentHtml)
+  }, [editor, initialContentHtml, role])
 
   // Keep the editor's editable state in sync with our role once it's known.
   // NOTE: this only prevents the UI from letting a viewer type - it is NOT
@@ -462,28 +592,58 @@ export default function DocumentEditor({
     reader.readAsDataURL(file)
   }
 
+  const roleLabel = role ?? (role === null ? 'no access' : 'checking…')
+
   return (
     <div>
-      <p style={{ color: '#666' }}>
-        Document: <strong>{title}</strong> — status: <strong>{status}</strong> — your role:{' '}
-        <strong>{role ?? (role === null ? 'no access' : 'checking...')}</strong>
-      </p>
-
-      <PresenceBar peers={peers} />
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-xl font-semibold text-[var(--text)]">{title}</h2>
+          <div className="mt-1.5 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+            <span className="flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass[status] ?? 'bg-[var(--text-muted)]'}`} />
+              {status}
+            </span>
+            <span className="opacity-40">·</span>
+            <span
+              className={`rounded-full px-2 py-0.5 font-medium ${roleBadgeClass[roleLabel] ?? 'bg-[var(--surface-2)]'}`}
+            >
+              {roleLabel}
+            </span>
+            {saveStatus && (
+              <>
+                <span className="opacity-40">·</span>
+                <span className="flex items-center gap-1">
+                  {saveStatus === 'saving' ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Check size={11} />
+                  )}
+                  {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+        <PresenceBar peers={peers} />
+      </div>
 
       {role === null && (
-        <p style={{ color: '#b3261e' }}>
+        <div className="mb-4 rounded-xl bg-[var(--danger-soft)] px-4 py-2.5 text-sm text-[var(--danger)]">
           Your access to this document has been revoked or removed.
-        </p>
+        </div>
       )}
 
       {role === 'viewer' && (
-        <p style={{ color: '#b06a00' }}>You have view-only access to this document.</p>
+        <div className="mb-4 rounded-xl bg-amber-50 px-4 py-2.5 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+          You have view-only access to this document.
+        </div>
       )}
 
-      {role === 'owner' && <SharesManager docId={docId} token={token} />}
-
-      <VersionHistory docId={docId} token={token} role={role} ydoc={ydoc} editor={editor} />
+      <div className="mb-4 flex flex-wrap gap-2">
+        {role === 'owner' && <SharesManager docId={docId} token={token} />}
+        <VersionHistory docId={docId} token={token} role={role} ydoc={ydoc} editor={editor} />
+      </div>
 
       <input
         ref={fileInputRef}

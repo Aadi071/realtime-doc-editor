@@ -1,7 +1,85 @@
+@import "tailwindcss";
+
+/* Tailwind v4 has no JS config file by default - dark mode is opted into
+   via this custom variant instead of a `darkMode: 'class'` setting. Any
+   `dark:` utility now applies whenever an ancestor has the `.dark` class
+   (toggled by ThemeProvider in theme.tsx), NOT based on OS preference -
+   that's what makes this a user-controlled toggle instead of just
+   following the system setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens as plain CSS custom properties (not Tailwind @theme
+   tokens) so they can be swapped at runtime by toggling the `.dark`
+   class on <html> - Tailwind's @theme values are baked in at build time
+   and can't respond to a runtime class toggle the same way. Components
+   reference these via Tailwind's arbitrary-value syntax, e.g.
+   `bg-[var(--surface)]`. */
+:root {
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --border: #e5e7eb;
+  --text: #18181b;
+  --text-muted: #6b7280;
+  --accent: #3b5bdb;
+  --accent-soft: #e8ecff;
+  --accent-contrast: #ffffff;
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: #0e1013;
+  --surface: #17191f;
+  --surface-2: #1c1f26;
+  --border: #2a2d36;
+  --text: #f2f3f5;
+  --text-muted: #9aa0ab;
+  --accent: #7c93ff;
+  --accent-soft: #212a49;
+  --accent-contrast: #0e1013;
+  --danger: #f87171;
+  --danger-soft: #3a1d1d;
+}
+
+/* The "effortless" feel of a theme switch comes from color properties
+   easing instead of snapping - this is deliberately scoped to color
+   properties only (not `all`), so layout-affecting properties like
+   width/height/transform aren't accidentally slowed down everywhere. */
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color, fill, stroke,
+    box-shadow;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #f4f5f7;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Smooth scrolling for the homepage's "scroll to features" chevron link
+   (see Home.tsx). Scoped behind prefers-reduced-motion so it doesn't fight
+   that setting the same way Reveal.tsx already respects it for its own
+   scroll-triggered animations. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* A reusable "Apple-site" easing curve for anything animated with
+   Tailwind's `transition` + `duration` utilities (hover states, modal
+   entrances, etc.) - Tailwind's default `ease-out` is close but this
+   custom cubic-bezier has a slightly gentler settle. */
+.ease-smooth {
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .page {
@@ -10,13 +88,37 @@ body {
   padding: 0 20px;
 }
 
+/* A small, dependency-free entrance animation used when switching between
+   top-level views (login <-> document list <-> editor) so the swap feels
+   like a soft cross-fade instead of an instant snap. Anty mentioned
+   wanting to add proper animation libraries later - this is deliberately
+   minimal so it's easy to replace wholesale rather than fight with. */
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fade-slide-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 .editor-shell {
-  background: white;
-  border: 1px solid #e2e2e2;
-  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   min-height: 400px;
   padding: 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.dark .editor-shell {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .ProseMirror {
@@ -32,9 +134,9 @@ body {
   gap: 10px;
   margin: -24px -24px 16px -24px; /* undo .editor-shell's padding so this spans edge-to-edge */
   padding: 10px 24px;
-  background: white;
-  border-bottom: 1px solid #e2e2e2;
-  border-radius: 8px 8px 0 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
   /* Sticks to the top of the viewport while scrolling a long document,
      Word/Google-Docs style - `top: 0` means "stick once you'd otherwise
      scroll past the top of the browser window". */
@@ -47,7 +149,7 @@ body {
   display: flex;
   gap: 2px;
   padding-right: 10px;
-  border-right: 1px solid #e8e8e8;
+  border-right: 1px solid var(--border);
 }
 
 .toolbar-group:last-child {
@@ -61,15 +163,15 @@ body {
   justify-content: center;
   border: 1px solid transparent;
   background: transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   width: 30px;
   height: 30px;
   cursor: pointer;
-  color: #333;
+  color: var(--text);
 }
 
 .toolbar button:hover:not(:disabled) {
-  background: #f0f1f3;
+  background: var(--bg);
 }
 
 .toolbar button:disabled {
@@ -78,13 +180,13 @@ body {
 }
 
 .toolbar button.is-active {
-  background: #dbe4ff;
-  border-color: #94aefd;
-  color: #2c4bd6;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .ProseMirror a {
-  color: #3b5bdb;
+  color: var(--accent);
   text-decoration: underline;
 }
 
@@ -137,8 +239,66 @@ body {
   border-radius: 4px;
 }
 
+/* Rendered by @aarkue/tiptap-math-extension (via KaTeX) for each inline
+   math node. KaTeX's own glyphs already inherit `color` from their
+   surroundings, so this is just a subtle pill background to make math
+   visually distinct from plain text, matching `.ProseMirror code`'s
+   treatment elsewhere in the app. */
+.tiptap-math.latex {
+  display: inline-block;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.tiptap-math.result {
+  margin-left: 4px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .ProseMirror img.ProseMirror-selectednode {
-  outline: 2px solid #3b5bdb;
+  outline: 2px solid var(--accent);
+}
+
+/* Standard Tiptap task-list markup (@tiptap/extension-task-list +
+   @tiptap/extension-task-item), used by the "Meeting notes" and "To-do
+   list" templates in templates.ts. Structure per node is
+   <li data-checked="true|false"><label><input type=checkbox><span/></label><div><p>...</p></div></li> -
+   the plain <ul> bullet marker is suppressed in favor of the checkbox. */
+.ProseMirror ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.ProseMirror ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.ProseMirror ul[data-type='taskList'] li > label {
+  flex: 0 0 auto;
+  margin-top: 0.3rem;
+  user-select: none;
+}
+
+.ProseMirror ul[data-type='taskList'] li > div {
+  flex: 1 1 auto;
+}
+
+.ProseMirror ul[data-type='taskList'] li > div > p {
+  margin: 0;
+}
+
+.ProseMirror ul[data-type='taskList'] input[type='checkbox'] {
+  cursor: pointer;
+}
+
+.ProseMirror ul[data-type='taskList'] li[data-checked='true'] > div > p {
+  color: var(--text-muted);
+  text-decoration: line-through;
 }
 
 .modal-backdrop {
@@ -149,19 +309,234 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 100;
+  animation: backdrop-in 150ms ease both;
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .modal {
-  background: white;
-  border-radius: 8px;
+  background: var(--surface);
+  border-radius: 16px;
   padding: 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  animation: modal-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Toast entrance: slides in from the right and settles, rather than the
+   plain fade-slide-up used for page-level transitions - gives the
+   notification stack its own distinct motion so it reads as "arriving"
+   rather than "the page changed". */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.toast-in {
+  animation: toast-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Command palette overrides two things about the generic .modal-backdrop/
+   .modal it otherwise reuses (for the shared fade/scale-in animations):
+   top-aligned instead of centered (command palettes conventionally sit
+   near the top of the screen, not dead center), and no padding (the
+   search input needs to span edge-to-edge with its own border-bottom).
+   Declared after .modal-backdrop/.modal below so these win on the
+   conflicting properties via plain CSS source order, rather than fighting
+   Tailwind utility-class specificity for an override that has to be
+   reliable. */
+.command-palette-backdrop {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.command-palette-modal {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Fires once, on the pair of letters where the hero wordmark's two typing
+   "cursors" meet in the middle (see TypedWordmark.tsx) - a quick glow +
+   scale flash standing in for "these two independent edits just merged
+   cleanly", the same moment the product's whole pitch is about. */
+@keyframes wordmark-pulse {
+  0% {
+    text-shadow: 0 0 0 transparent;
+    transform: scale(1);
+  }
+  40% {
+    text-shadow: 0 0 22px var(--accent);
+    transform: scale(1.14);
+  }
+  100% {
+    text-shadow: 0 0 0 transparent;
+    transform: scale(1);
+  }
+}
+
+.wordmark-pulse {
+  animation: wordmark-pulse 650ms ease-out both;
+}
+
+/* The logo's cursor bar (see Logo.tsx) blinks like a real text cursor -
+   steps(1) rather than a smooth fade so it snaps on/off instead of
+   pulsing, which reads as "cursor" rather than "glowing icon". */
+@keyframes logo-cursor-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  95% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.logo-cursor-blink {
+  animation: logo-cursor-blink 1.1s steps(1) infinite;
+}
+
+/* Recurring hero wordmark flourishes (see TypedWordmark.tsx), fired every
+   ~10s once the initial type-in has settled. */
+
+/* RTEDTR mirrors itself: R-T at the start, T-R at the end. Rather than
+   swapping two adjacent letters, the opening R arcs all the way across to
+   the closing R's spot (and back), and the opening T does the same with
+   the closing T - a swap that's felt across the whole word, not just a
+   local nudge. Distances are in em, roughly matched to how many letters
+   apart each pair sits (R0<->R5 is 5 letters apart, T1<->T4 is 3) - an
+   approximation since the font isn't monospace, close enough for a
+   decorative flourish. The two pairs arc in opposite Y directions so
+   their crossing paths stay visually distinct instead of blurring
+   together mid-animation. Text never actually reorders - this is all
+   `transform`, the DOM/aria-label stays "RTEDTR" throughout. */
+@keyframes letter-mirror-r-start {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate(4em, -0.65em) rotate(18deg);
+  }
+}
+
+@keyframes letter-mirror-r-end {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate(-4em, 0.65em) rotate(-18deg);
+  }
+}
+
+@keyframes letter-mirror-t-start {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate(2.4em, 0.5em) rotate(-14deg);
+  }
+}
+
+@keyframes letter-mirror-t-end {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate(-2.4em, -0.5em) rotate(14deg);
+  }
+}
+
+.letter-mirror-r-start {
+  animation: letter-mirror-r-start 1400ms cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+
+.letter-mirror-r-end {
+  animation: letter-mirror-r-end 1400ms cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+
+.letter-mirror-t-start {
+  animation: letter-mirror-t-start 1400ms cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+
+.letter-mirror-t-end {
+  animation: letter-mirror-t-end 1400ms cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+
+/* Every letter hops slightly, staggered by index (see the inline
+   animationDelay in TypedWordmark.tsx) - reads as a ripple passing
+   through the word rather than all six letters bouncing in sync. */
+@keyframes letter-repop {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-0.18em) scale(1.08);
+  }
+}
+
+.letter-repop {
+  animation: letter-repop 700ms ease-out both;
+}
+
+/* The faint Logo that flashes in behind the letters during the
+   "documentPop" flourish - as if the word is being freshly pulled off
+   the page it lives on. */
+@keyframes document-pop-icon {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  40% {
+    opacity: 0.35;
+    transform: scale(1.05);
+  }
+  70% {
+    opacity: 0.2;
+    transform: scale(1);
+  }
+}
+
+.document-pop-icon {
+  animation: document-pop-icon 1200ms ease-out both;
 }
 
 .drawing-canvas {
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 4px;
   touch-action: none; /* prevents the page from scrolling while drawing on touch devices */
   cursor: crosshair;
   display: block;
+  background: white; /* always white regardless of theme - drawings are meant to look like ink on paper */
 }

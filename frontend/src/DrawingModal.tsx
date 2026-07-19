@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { Trash2 } from 'lucide-react'
 
 // A simple local sketch pad. NOT collaborative - only you see your strokes
 // while drawing. When you click "Insert", the whole canvas is rasterized
@@ -75,14 +76,19 @@ export default function DrawingModal({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0 }}>Draw something</h3>
+        <h3 className="mb-3 text-base font-semibold text-[var(--text)]">Draw something</h3>
 
-        <div style={{ display: 'flex', gap: 12, marginBottom: 10, alignItems: 'center' }}>
-          <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div className="mb-3 flex items-center gap-4">
+          <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
             Color
-            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              className="h-7 w-7 cursor-pointer rounded-md border border-[var(--border)] bg-transparent p-0.5"
+            />
           </label>
-          <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}>
+          <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
             Brush size
             <input
               type="range"
@@ -90,9 +96,17 @@ export default function DrawingModal({
               max={20}
               value={lineWidth}
               onChange={(e) => setLineWidth(Number(e.target.value))}
+              className="accent-[var(--accent)]"
             />
           </label>
-          <button type="button" onClick={clearCanvas}>
+          <button
+            type="button"
+            onClick={clearCanvas}
+            className="ease-smooth ml-auto flex items-center gap-1.5 rounded-lg border border-[var(--border)]
+              px-2.5 py-1 text-xs font-medium text-[var(--text-muted)] transition-colors duration-150
+              hover:bg-[var(--bg)] hover:text-[var(--text)]"
+          >
+            <Trash2 size={13} />
             Clear
           </button>
         </div>
@@ -108,11 +122,21 @@ export default function DrawingModal({
           onPointerLeave={stopDrawing}
         />
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onClose}>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="ease-smooth rounded-lg border border-[var(--border)] px-3.5 py-1.5 text-sm font-medium
+              text-[var(--text)] transition-colors duration-150 hover:bg-[var(--bg)]"
+          >
             Cancel
           </button>
-          <button type="button" onClick={insert}>
+          <button
+            type="button"
+            onClick={insert}
+            className="ease-smooth rounded-lg bg-[var(--accent)] px-3.5 py-1.5 text-sm font-medium
+              text-[var(--accent-contrast)] transition-opacity duration-150 hover:opacity-90"
+          >
             Insert into document
           </button>
         </div>

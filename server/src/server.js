@@ -11,6 +11,16 @@
 
 require('dotenv').config()
 
+// Railway's network (and many other cloud hosts) advertises IPv6 DNS
+// records for external services like Gmail's SMTP servers but doesn't
+// actually have a working IPv6 route out of the container. Node's default
+// DNS ordering tries whatever the resolver returns first, which is often
+// the IPv6 address - that connection attempt doesn't fail fast, it hangs
+// until it exhausts its own retries before falling back to IPv4, which is
+// exactly what was turning every signup into a ~2 minute wait. Preferring
+// IPv4 results for all DNS lookups in this process avoids that entirely.
+require('dns').setDefaultResultOrder('ipv4first')
+
 const http = require('http')
 const express = require('express')
 const cors = require('cors')
@@ -23,6 +33,7 @@ const { persistence } = require('./persistence')
 const { verifyToken } = require('./auth')
 const { getDocumentRole } = require('./access')
 const { attachPresenceBridge } = require('./presenceBridge')
+const { ensureSchema } = require('./ensureSchema')
 
 // Tell y-websocket to use our Postgres-backed persistence hooks instead of
 // the default (no persistence at all - documents live only in memory).
@@ -41,9 +52,14 @@ const PORT = process.env.PORT || 1234
 
 const app = express()
 // CORS_ORIGIN lets you lock this down to your deployed frontend's exact
-// origin in production. Defaults to "*" (allow anything) for local dev,
-// where the frontend runs on a different port (5173) than this API.
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }))
+// origin(s) in production - comma-separated if the app is reachable at more
+// than one domain (e.g. a friendlier alias alongside the original Vercel
+// URL). Defaults to "*" (allow anything) for local dev, where the frontend
+// runs on a different port (5173) than this API.
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
+  : '*'
+app.use(cors({ origin: allowedOrigins }))
 app.use(express.json()) // parse JSON request bodies into req.body
 
 app.get('/', (_req, res) => {
@@ -102,6 +118,20 @@ server.on('upgrade', async (request, socket, head) => {
   }
 })
 
-server.listen(PORT, () => {
-  console.log(`Server (REST + WebSocket) listening on http://localhost:${PORT}`)
-})
+// Make sure the schema exists before accepting any traffic - see
+// ensureSchema.js for why this is needed on top of db/init/001_schema.sql.
+;(async () => {
+  try {
+    await ensureSchema()
+  } catch (err) {
+    console.error('[db] failed to ensure schema:', err)
+    process.exit(1)
+    return
+  }
+
+  server.listen(PORT, () => {
+    console.log(`Server (REST + WebSocket) listening on http://localhost:${PORT}`)
+  })
+})()
+
+// redeploy trigger: git author email fixed on GitHub
